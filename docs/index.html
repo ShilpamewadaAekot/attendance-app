@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Attendance</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        font-size: 14px;
+        display: flex;
+        justify-content: center;
+        margin: 0;
+        padding: 20px;
+        background: #f5f5f5;
+      }
+      #card {
+        width: 100%;
+        max-width: 360px;
+      }
+      video, canvas {
+        width: 100%;
+        border-radius: 6px;
+        background: #000;
+      }
+      #status { margin: 10px 0; padding: 8px; border-radius: 4px; text-align: center; }
+      .ok { background: #e6f4ea; color: #137333; }
+      .err { background: #fce8e6; color: #c5221f; }
+      .info { background: #e8f0fe; color: #1967d2; }
+      input {
+        width: 100%; padding: 10px; margin-bottom: 10px;
+        border: 1px solid #ccc; border-radius: 6px; font-size: 14px;
+        box-sizing: border-box;
+      }
+      button {
+        width: 100%; padding: 10px; margin-top: 10px;
+        border: none; border-radius: 6px; font-size: 14px; cursor: pointer;
+        background: #1a73e8; color: white;
+      }
+      button:disabled { background: #ccc; cursor: not-allowed; }
+      label { display: block; margin-bottom: 4px; color: #444; }
+    </style>
+  </head>
+  <body>
+    <div id="card">
+      <label for="nameInput">Name</label>
+      <input id="nameInput" type="text" placeholder="Your name">
+
+      <label for="emailInput">Email</label>
+      <input id="emailInput" type="email" placeholder="you@company.com">
+
+      <div id="status" class="info">Checking Wi-Fi connection...</div>
+
+      <video id="video" autoplay playsinline></video>
+      <canvas id="canvas" style="display:none;"></canvas>
+
+      <button id="captureBtn" disabled>Take Attendance Photo</button>
+    </div>
+
+    <script>
+      // Apps Script Web App URL (doPost endpoint)
+      var SCRIPT_URL = 'PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE';
+
+      var clientIp = '';
+      var video = document.getElementById('video');
+      var canvas = document.getElementById('canvas');
+      var captureBtn = document.getElementById('captureBtn');
+      var statusEl = document.getElementById('status');
+      var nameInput = document.getElementById('nameInput');
+      var emailInput = document.getElementById('emailInput');
+
+      function setStatus(msg, type) {
+        statusEl.textContent = msg;
+        statusEl.className = type;
+      }
+
+      // Restore last-used name/email
+      nameInput.value = localStorage.getItem('attendanceName') || '';
+      emailInput.value = localStorage.getItem('attendanceEmail') || '';
+
+      // 1. Start webcam
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setStatus('Camera not supported in this browser.', 'err');
+      } else {
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } })
+          .then(function(stream) {
+            video.srcObject = stream;
+            video.onloadedmetadata = function() { video.play(); };
+          })
+          .catch(function(err) {
+            setStatus('Camera error: ' + err.message, 'err');
+          });
+      }
+
+      // 2. Detect public IP and verify against allowed office network
+      fetch('https://api.ipify.org?format=json')
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          clientIp = data.ip;
+          setStatus('Detected IP: ' + clientIp + '. Ready to mark attendance.', 'ok');
+          captureBtn.disabled = false;
+        })
+        .catch(function() {
+          setStatus('Could not detect network IP. Check your internet connection.', 'err');
+        });
+
+      // 3. Capture photo and submit to Apps Script backend
+      captureBtn.addEventListener('click', function() {
+        var name = nameInput.value.trim();
+        var email = emailInput.value.trim();
+
+        if (!name || !email) {
+          setStatus('Please enter your name and email.', 'err');
+          return;
+        }
+
+        localStorage.setItem('attendanceName', name);
+        localStorage.setItem('attendanceEmail', email);
+
+        captureBtn.disabled = true;
+        captureBtn.textContent = 'Submitting...';
+
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        canvas.getContext('2d').drawImage(video, 0, 0);
+        var photoDataUrl = canvas.toDataURL('image/jpeg', 0.8);
+
+        fetch(SCRIPT_URL, {
+          method: 'POST',
+          body: JSON.stringify({
+            clientIp: clientIp,
+            name: name,
+            email: email,
+            photoDataUrl: photoDataUrl
+          })
+        })
+          .then(function(res) { return res.json(); })
+          .then(function(data) {
+            if (data.success) {
+              var label = data.result.session === 'checkin' ? 'Check-in' : 'Check-out';
+              setStatus(label + ' marked at ' + data.result.time, 'ok');
+            } else {
+              setStatus(data.error, 'err');
+            }
+            captureBtn.textContent = 'Take Attendance Photo';
+            captureBtn.disabled = false;
+          })
+          .catch(function(err) {
+            setStatus('Network error: ' + err.message, 'err');
+            captureBtn.textContent = 'Take Attendance Photo';
+            captureBtn.disabled = false;
+          });
+      });
+    </script>
+  </body>
+</html>
