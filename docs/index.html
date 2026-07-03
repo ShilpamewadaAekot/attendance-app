@@ -47,7 +47,10 @@
       <input id="nameInput" type="text" placeholder="Your name">
 
       <label for="emailInput">Email</label>
-      <input id="emailInput" type="email" placeholder="you@company.com">
+      <input id="emailInput" type="email" placeholder="you@aekot.com">
+
+      <label for="pinInput">PIN</label>
+      <input id="pinInput" type="password" inputmode="numeric" maxlength="4" placeholder="4-digit PIN">
 
       <div id="status" class="info">Checking Wi-Fi connection...</div>
 
@@ -68,6 +71,7 @@
       var statusEl = document.getElementById('status');
       var nameInput = document.getElementById('nameInput');
       var emailInput = document.getElementById('emailInput');
+      var pinInput = document.getElementById('pinInput');
 
       function setStatus(msg, type) {
         statusEl.textContent = msg;
@@ -108,9 +112,10 @@
       captureBtn.addEventListener('click', function() {
         var name = nameInput.value.trim();
         var email = emailInput.value.trim();
+        var pin = pinInput.value.trim();
 
-        if (!name || !email) {
-          setStatus('Please enter your name and email.', 'err');
+        if (!name || !email || !pin) {
+          setStatus('Please enter your name, email and PIN.', 'err');
           return;
         }
 
@@ -137,6 +142,7 @@
             clientIp: clientIp,
             name: name,
             email: email,
+            pin: pin,
             photoDataUrl: photoDataUrl
           })
         })
@@ -148,11 +154,13 @@
             } else {
               setStatus(data.error, 'err');
             }
+            pinInput.value = '';
             captureBtn.textContent = 'Take Attendance Photo';
             captureBtn.disabled = false;
           })
           .catch(function(err) {
             setStatus('Network error: ' + err.message, 'err');
+            pinInput.value = '';
             captureBtn.textContent = 'Take Attendance Photo';
             captureBtn.disabled = false;
           });
