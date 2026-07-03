@@ -114,6 +114,11 @@
           return;
         }
 
+        if (email.split('@')[1] !== 'aekot.com') {
+          setStatus('Only @aekot.com email addresses can mark attendance.', 'err');
+          return;
+        }
+
         localStorage.setItem('attendanceName', name);
         localStorage.setItem('attendanceEmail', email);
 
