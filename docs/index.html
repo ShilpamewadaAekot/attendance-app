@@ -32,6 +32,7 @@
         border: 1px solid #ccc; border-radius: 6px; font-size: 14px;
         box-sizing: border-box;
       }
+      input:disabled { background: #f0f0f0; color: #888; }
       button {
         width: 100%; padding: 10px; margin-top: 10px;
         border: none; border-radius: 6px; font-size: 14px; cursor: pointer;
@@ -39,25 +40,32 @@
       }
       button:disabled { background: #ccc; cursor: not-allowed; }
       label { display: block; margin-bottom: 4px; color: #444; }
+      #cameraSection { display: none; }
     </style>
   </head>
   <body>
     <div id="card">
       <label for="nameInput">Name</label>
-      <input id="nameInput" type="text" placeholder="Your name">
+      <input id="nameInput" type="text" placeholder="Your registered name">
 
       <label for="emailInput">Email</label>
       <input id="emailInput" type="email" placeholder="you@aekot.com">
 
-      <label for="pinInput">PIN</label>
-      <input id="pinInput" type="password" inputmode="numeric" maxlength="4" placeholder="4-digit PIN">
+      <button id="submitBtn">Submit</button>
 
-      <div id="status" class="info">Checking Wi-Fi connection...</div>
+      <div id="otpSection" style="display:none;">
+        <label for="otpInput">Verification Code</label>
+        <input id="otpInput" type="text" inputmode="numeric" maxlength="6" placeholder="6-digit code">
+        <button id="verifyBtn">Verify</button>
+      </div>
 
-      <video id="video" autoplay playsinline></video>
-      <canvas id="canvas" style="display:none;"></canvas>
+      <div id="status" class="info">Enter your name and email to begin.</div>
 
-      <button id="captureBtn" disabled>Take Attendance Photo</button>
+      <div id="cameraSection">
+        <video id="video" autoplay playsinline></video>
+        <canvas id="canvas" style="display:none;"></canvas>
+        <button id="captureBtn" disabled>Take Attendance Photo</button>
+      </div>
     </div>
 
     <script>
@@ -65,68 +73,132 @@
       var SCRIPT_URL = 'https://script.google.com/a/macros/aekot.com/s/AKfycbzB4AhGPXvl9mXkxyXEEVOYO1HLtqCl4FsoRr2PDRtNRgdIU-pnFazGSPzyYGyE9A4OKA/exec';
 
       var clientIp = '';
+      var verifiedName = '';
+      var verifiedEmail = '';
+
+      var nameInput = document.getElementById('nameInput');
+      var emailInput = document.getElementById('emailInput');
+      var submitBtn = document.getElementById('submitBtn');
+      var otpSection = document.getElementById('otpSection');
+      var otpInput = document.getElementById('otpInput');
+      var verifyBtn = document.getElementById('verifyBtn');
+      var statusEl = document.getElementById('status');
+      var cameraSection = document.getElementById('cameraSection');
       var video = document.getElementById('video');
       var canvas = document.getElementById('canvas');
       var captureBtn = document.getElementById('captureBtn');
-      var statusEl = document.getElementById('status');
-      var nameInput = document.getElementById('nameInput');
-      var emailInput = document.getElementById('emailInput');
-      var pinInput = document.getElementById('pinInput');
 
       function setStatus(msg, type) {
         statusEl.textContent = msg;
         statusEl.className = type;
       }
 
-      // Restore last-used name/email
-      nameInput.value = localStorage.getItem('attendanceName') || '';
-      emailInput.value = localStorage.getItem('attendanceEmail') || '';
+      function callBackend(payload) {
+        return fetch(SCRIPT_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify(payload)
+        }).then(function(res) { return res.json(); });
+      }
 
-      // 1. Start webcam
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        setStatus('Camera not supported in this browser.', 'err');
-      } else {
+      // Detect public IP up front (used later when marking attendance).
+      fetch('https://api.ipify.org?format=json')
+        .then(function(res) { return res.json(); })
+        .then(function(data) { clientIp = data.ip; })
+        .catch(function() {});
+
+      // Step 1: Submit name + email -> validate + send OTP
+      submitBtn.addEventListener('click', function() {
+        var name = nameInput.value.trim();
+        var email = emailInput.value.trim();
+
+        if (!name || !email) {
+          setStatus('Please enter your name and email.', 'err');
+          return;
+        }
+
+        if (email.split('@')[1] !== 'aekot.com') {
+          setStatus('Only @aekot.com email addresses are allowed.', 'err');
+          return;
+        }
+
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Sending code...';
+        setStatus('Validating and sending verification code...', 'info');
+
+        callBackend({ action: 'requestOtp', name: name, email: email })
+          .then(function(data) {
+            if (data.success) {
+              setStatus('Verification code sent to ' + email + '.', 'ok');
+              nameInput.disabled = true;
+              emailInput.disabled = true;
+              submitBtn.style.display = 'none';
+              otpSection.style.display = 'block';
+            } else {
+              setStatus(data.error, 'err');
+              submitBtn.disabled = false;
+              submitBtn.textContent = 'Submit';
+            }
+          })
+          .catch(function(err) {
+            setStatus('Network error: ' + err.message, 'err');
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Submit';
+          });
+      });
+
+      // Step 2: Verify OTP -> unlock camera
+      verifyBtn.addEventListener('click', function() {
+        var otp = otpInput.value.trim();
+        if (!otp) {
+          setStatus('Please enter the verification code.', 'err');
+          return;
+        }
+
+        verifyBtn.disabled = true;
+        verifyBtn.textContent = 'Verifying...';
+
+        var email = emailInput.value.trim();
+        callBackend({ action: 'verifyOtp', email: email, otp: otp })
+          .then(function(data) {
+            if (data.success) {
+              verifiedName = nameInput.value.trim();
+              verifiedEmail = email;
+              setStatus('Verified. You may now mark attendance.', 'ok');
+              otpSection.style.display = 'none';
+              cameraSection.style.display = 'block';
+              startCamera();
+            } else {
+              setStatus(data.error, 'err');
+              verifyBtn.disabled = false;
+              verifyBtn.textContent = 'Verify';
+            }
+          })
+          .catch(function(err) {
+            setStatus('Network error: ' + err.message, 'err');
+            verifyBtn.disabled = false;
+            verifyBtn.textContent = 'Verify';
+          });
+      });
+
+      function startCamera() {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          setStatus('Camera not supported in this browser.', 'err');
+          return;
+        }
         navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } })
           .then(function(stream) {
             video.srcObject = stream;
             video.onloadedmetadata = function() { video.play(); };
+            captureBtn.disabled = false;
           })
           .catch(function(err) {
             setStatus('Camera error: ' + err.message, 'err');
           });
       }
 
-      // 2. Detect public IP and verify against allowed office network
-      fetch('https://api.ipify.org?format=json')
-        .then(function(res) { return res.json(); })
-        .then(function(data) {
-          clientIp = data.ip;
-          setStatus('Network verified. Ready to mark attendance.', 'ok');
-          captureBtn.disabled = false;
-        })
-        .catch(function() {
-          setStatus('Could not detect network IP. Check your internet connection.', 'err');
-        });
-
-      // 3. Capture photo and submit to Apps Script backend
+      // Step 3: Capture photo and mark attendance
       captureBtn.addEventListener('click', function() {
-        var name = nameInput.value.trim();
-        var email = emailInput.value.trim();
-        var pin = pinInput.value.trim();
-
-        if (!name || !email || !pin) {
-          setStatus('Please enter your name, email and PIN.', 'err');
-          return;
-        }
-
-        if (email.split('@')[1] !== 'aekot.com') {
-          setStatus('Only @aekot.com email addresses can mark attendance.', 'err');
-          return;
-        }
-
-        localStorage.setItem('attendanceName', name);
-        localStorage.setItem('attendanceEmail', email);
-
         captureBtn.disabled = true;
         captureBtn.textContent = 'Submitting...';
 
@@ -135,18 +207,13 @@
         canvas.getContext('2d').drawImage(video, 0, 0);
         var photoDataUrl = canvas.toDataURL('image/jpeg', 0.8);
 
-        fetch(SCRIPT_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({
-            clientIp: clientIp,
-            name: name,
-            email: email,
-            pin: pin,
-            photoDataUrl: photoDataUrl
-          })
+        callBackend({
+          action: 'markAttendance',
+          clientIp: clientIp,
+          name: verifiedName,
+          email: verifiedEmail,
+          photoDataUrl: photoDataUrl
         })
-          .then(function(res) { return res.json(); })
           .then(function(data) {
             if (data.success) {
               var label = data.result.session === 'checkin' ? 'Check-in' : 'Check-out';
@@ -154,13 +221,11 @@
             } else {
               setStatus(data.error, 'err');
             }
-            pinInput.value = '';
             captureBtn.textContent = 'Take Attendance Photo';
             captureBtn.disabled = false;
           })
           .catch(function(err) {
             setStatus('Network error: ' + err.message, 'err');
-            pinInput.value = '';
             captureBtn.textContent = 'Take Attendance Photo';
             captureBtn.disabled = false;
           });
