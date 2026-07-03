@@ -101,7 +101,7 @@
         .then(function(res) { return res.json(); })
         .then(function(data) {
           clientIp = data.ip;
-          setStatus('Detected IP: ' + clientIp + '. Ready to mark attendance.', 'ok');
+          setStatus('Network verified. Ready to mark attendance.', 'ok');
           captureBtn.disabled = false;
         })
         .catch(function() {
